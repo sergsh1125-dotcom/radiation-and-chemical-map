@@ -2,194 +2,162 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from folium.features import DivIcon
-from datetime import datetime
-from io import BytesIO
 
 # ===============================
-# НАЛАШТУВАННЯ
+# Налаштування сторінки (ВАЖЛИВО)
 # ===============================
 st.set_page_config(
-    page_title="Карта хімічної та радіаційної обстановки",
+    page_title="Chemical Situation Map",
     layout="wide"
 )
+
+# Приховуємо службові елементи Streamlit
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* Мобільна адаптація */
+@media (max-width: 768px) {
+    .block-container {
+        padding: 0.5rem;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ===============================
 # СТАН
 # ===============================
 if "data" not in st.session_state:
-    st.session_state.data = []
+    st.session_state.data = pd.DataFrame(
+        columns=["lat", "lon", "value", "time"]
+    )
+
+if "substance" not in st.session_state:
+    st.session_state.substance = "Хлор"
 
 # ===============================
 # ЗАГОЛОВОК
 # ===============================
-st.title("🗺️ Карта хімічної та радіаційної обстановки")
+st.title("🧪 Хімічна обстановка")
 
 # ===============================
-# ІНСТРУКЦІЯ
+# МОБІЛЬНИЙ GUI (ЗГОРТАННЯ)
 # ===============================
-with st.sidebar.expander("📘 Інструкція користування"):
-    st.markdown("""
-**Призначення програми**  
-Програма призначена для нанесення на карту:
-- хімічної обстановки (мг/куб.м)
-- радіаційної обстановки (мЗв/год)
+with st.expander("⚙️ Ввід даних / Data input", expanded=False):
 
-**Вхідні дані**
-- координати точки вимірювання концентрації небезпечної хімічної речовини (бойової отруйної речовини) або потужності дози опромінення
-- значення концентрації НХР (БОР) або потужності дози опромінення
-- час вимірювання
-- назва небезпечної хімічної речовини (бойової отруйної речовини) 
+    st.session_state.substance = st.text_input(
+        "Назва небезпечної речовини",
+        st.session_state.substance
+    )
 
-**Способи введення даних**
-1. Вручну через графічний інтерфейс
-2. Через CSV-файли:
-   - `chemical.data.csv`
-   - `radiation.data.csv`
+    st.markdown("### ➕ Додати точку")
 
-**Вихідні дані**
-- карта з точками вимірювання
-- кольорове розділення:
-  - ☣️ НХР (БОР) — **синій**
-  - ☢️ потужність дози  — **бордовий**
-- підпис біля кожної точки
-- можливість збереження карти у HTML
-""")
+    lat = st.number_input("Широта (lat)", format="%.6f")
+    lon = st.number_input("Довгота (lon)", format="%.6f")
+    value = st.number_input(
+        "Концентрація (мг/куб.м)",
+        min_value=0.0,
+        step=0.01
+    )
+    time = st.text_input(
+        "Час вимірювання",
+        placeholder="2026-01-09 12:30"
+    )
+
+    if st.button("➕ Додати точку", use_container_width=True):
+        st.session_state.data = pd.concat(
+            [
+                st.session_state.data,
+                pd.DataFrame([{
+                    "lat": lat,
+                    "lon": lon,
+                    "value": value,
+                    "time": time
+                }])
+            ],
+            ignore_index=True
+        )
+
+    st.divider()
+
+    uploaded = st.file_uploader(
+        "📂 Завантажити CSV",
+        type=["csv"]
+    )
+
+    if uploaded:
+        st.session_state.data = pd.read_csv(uploaded)
+        st.success(f"Завантажено {len(st.session_state.data)} точок")
+
+    if st.button("🧹 Очистити всі дані", use_container_width=True):
+        st.session_state.data = st.session_state.data.iloc[0:0]
 
 # ===============================
-# БОКОВА ПАНЕЛЬ — ВРУЧНУ
+# КАРТА (НА ВСЮ ШИРИНУ)
 # ===============================
-st.sidebar.header("➕ Додати точку вручну")
-
-mode = st.sidebar.radio("Тип обстановки", ["Радіаційна", "Хімічна"])
-lat = st.sidebar.number_input("Широта", format="%.6f")
-lon = st.sidebar.number_input("Довгота", format="%.6f")
-
-if mode == "Радіаційна":
-    value = st.sidebar.number_input("Потужність дози (мЗв/год)", format="%.4f")
-    substance = "Радіація"
-    unit = "мЗв/год"
-    color = "darkred"
+if st.session_state.data.empty:
+    st.info("Немає даних для відображення")
 else:
-    substance = st.sidebar.text_input("Назва речовини", "Хлор")
-    value = st.sidebar.number_input("Концентрація (мг/куб.м)", format="%.4f")
-    unit = "мг/куб.м"
-    color = "blue"
-
-time = st.sidebar.text_input(
-    "Час вимірювання",
-    datetime.now().strftime("%Y-%m-%d %H:%M")
-)
-
-if st.sidebar.button("➕ Додати точку"):
-    st.session_state.data.append({
-        "lat": lat,
-        "lon": lon,
-        "value": round(value, 2),
-        "time": time,
-        "substance": substance,
-        "unit": unit,
-        "color": color
-    })
-
-# ===============================
-# CSV ЗАВАНТАЖЕННЯ
-# ===============================
-st.sidebar.header("📂 Завантаження CSV")
-
-rad_file = st.sidebar.file_uploader(
-    "☢️ radiation.data.csv",
-    type="csv"
-)
-
-chem_file = st.sidebar.file_uploader(
-    "☣️ chemical.data.csv",
-    type="csv"
-)
-
-if st.sidebar.button("📥 Завантажити CSV"):
-    if rad_file:
-        df = pd.read_csv(rad_file)
-        for _, r in df.iterrows():
-            st.session_state.data.append({
-                "lat": r.lat,
-                "lon": r.lon,
-                "value": round(r.dose, 2),
-                "time": r.time,
-                "substance": "Радіація",
-                "unit": "мЗв/год",
-                "color": "darkred"
-            })
-
-    if chem_file:
-        df = pd.read_csv(chem_file)
-        for _, r in df.iterrows():
-            st.session_state.data.append({
-                "lat": r.lat,
-                "lon": r.lon,
-                "value": round(r.concentration, 2),
-                "time": r.time,
-                "substance": r.substance,
-                "unit": "мг/куб.м",
-                "color": "blue"
-            })
-
-# ===============================
-# ОЧИСТКА
-# ===============================
-if st.sidebar.button("🧹 Очистити всі дані"):
-    st.session_state.data.clear()
-
-# ===============================
-# КАРТА
-# ===============================
-if st.session_state.data:
-    df = pd.DataFrame(st.session_state.data)
+    df = st.session_state.data.copy()
 
     m = folium.Map(
         location=[df.lat.mean(), df.lon.mean()],
-        zoom_start=12,
+        zoom_start=13,
         control_scale=True
     )
 
     for _, r in df.iterrows():
+        label_html = f"""
+        <div style="
+            color: brown;
+            font-size: 14px;
+            font-weight: bold;
+            white-space: nowrap;
+        ">
+            {st.session_state.substance} – {r['value']} мг/куб.м
+            <hr style="margin:2px 0;border:1px solid brown;">
+            {r['time']}
+        </div>
+        """
+
         folium.CircleMarker(
-            location=[r.lat, r.lon],
+            [r.lat, r.lon],
             radius=7,
-            color=r.color,
+            color="brown",
             fill=True,
-            fill_color=r.color,
+            fill_color="brown",
             fill_opacity=0.9
         ).add_to(m)
 
         folium.Marker(
             [r.lat, r.lon],
-            icon=DivIcon(html=f"""
-            <div style="
-                color:{r.color};
-                font-weight:bold;
-                background:transparent;
-                white-space:nowrap">
-            {r.substance} – {r.value:.2f} {r.unit}<br>
-            {r.time}
-            </div>
-            """)
+            icon=folium.DivIcon(
+                icon_anchor=(0, -12),
+                html=label_html
+            )
         ).add_to(m)
 
-    # ВІДОБРАЖЕННЯ НА ВСЮ ШИРИНУ
-    st_folium(m, height=650, width=None)
-
-    # ===============================
-    # ЕКСПОРТ HTML
-    # ===============================
-    html_data = m.get_root().render()
-    st.download_button(
-        "💾 Зберегти карту у HTML",
-        data=html_data,
-        file_name="chemical_radiation_map.html",
-        mime="text/html"
+    # width=None → автоадаптація під екран
+    st_folium(
+        m,
+        width=None,
+        height=500,
+        key="mobile_map"
     )
 
-else:
-    st.info("Дані для відображення відсутні")
+    # ===============================
+    # HTML ЕКСПОРТ
+    # ===============================
+    m.save("chemical_map.html")
+    with open("chemical_map.html", "rb") as f:
+        st.download_button(
+            "💾 Завантажити карту (HTML)",
+            f,
+            file_name="chemical_map.html",
+            mime="text/html",
+            use_container_width=True
+        )
 
