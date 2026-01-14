@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from branca.element import DivIcon
+from folium.features import DivIcon
 from datetime import datetime
 
 # =========================
@@ -12,17 +12,17 @@ st.set_page_config(
     page_title="Карта радіаційної та хімічної обстановки",
     layout="wide"
 )
-
-st.title("🗺️ Карта радіаційної та хімічної обстановки")
+st.title("🗺️ Карта радіаційної та хімічної обстановки (адаптивна)")
 
 # =========================
 # Session State
 # =========================
 if "radiation" not in st.session_state:
     st.session_state.radiation = pd.DataFrame()
-
 if "chemical" not in st.session_state:
     st.session_state.chemical = pd.DataFrame()
+if "map_data_version" not in st.session_state:
+    st.session_state.map_data_version = 0
 
 # =========================
 # Інструкція
@@ -50,46 +50,38 @@ with st.expander("📘 Інструкція користування"):
 # =========================
 # Кнопки керування
 # =========================
-col1, col2, col3 = st.columns(3)
-
+col1, col2, col3 = st.columns([3,3,2])
 with col1:
-    rad_file = st.file_uploader(
-        "☢ Завантажити radiation.data.csv",
-        type="csv",
-        key="rad"
-    )
-
+    rad_file = st.file_uploader("☢ Завантажити radiation.data.csv", type="csv", key="rad")
 with col2:
-    chem_file = st.file_uploader(
-        "🧪 Завантажити chemical.data.csv",
-        type="csv",
-        key="chem"
-    )
-
+    chem_file = st.file_uploader("🧪 Завантажити chemical.data.csv", type="csv", key="chem")
 with col3:
     if st.button("🧹 Очистити всі дані"):
         st.session_state.radiation = pd.DataFrame()
         st.session_state.chemical = pd.DataFrame()
-        st.experimental_rerun()
+        st.session_state.map_data_version += 1
 
 # =========================
 # Завантаження CSV
 # =========================
-if rad_file:
-    df = pd.read_csv(rad_file)
-    required = {"lat", "lon", "value", "time"}
-    if required.issubset(df.columns):
-        st.session_state.radiation = df
-    else:
-        st.error("❌ radiation.data.csv має неправильні колонки")
+def load_csv(file, required_cols):
+    if file:
+        df = pd.read_csv(file)
+        if required_cols.issubset(df.columns):
+            return df
+        else:
+            st.error(f"❌ {file.name} має неправильні колонки")
+    return pd.DataFrame()
 
-if chem_file:
-    df = pd.read_csv(chem_file)
-    required = {"lat", "lon", "value", "time", "substance"}
-    if required.issubset(df.columns):
-        st.session_state.chemical = df
-    else:
-        st.error("❌ chemical.data.csv має неправильні колонки")
+rad_df = load_csv(rad_file, {"lat", "lon", "value", "time"})
+if not rad_df.empty:
+    st.session_state.radiation = rad_df
+    st.session_state.map_data_version += 1
+
+chem_df = load_csv(chem_file, {"lat", "lon", "value", "time", "substance"})
+if not chem_df.empty:
+    st.session_state.chemical = chem_df
+    st.session_state.map_data_version += 1
 
 # =========================
 # Ручне введення точок
@@ -99,6 +91,7 @@ mode = st.sidebar.radio("Тип обстановки", ["Радіаційна", 
 
 lat = st.sidebar.number_input("Широта", format="%.6f")
 lon = st.sidebar.number_input("Довгота", format="%.6f")
+time = st.sidebar.text_input("Час вимірювання", datetime.now().strftime("%Y-%m-%d %H:%M"))
 
 if mode == "Радіаційна":
     value = st.sidebar.number_input("Потужність дози (мЗв/год)", format="%.4f")
@@ -111,86 +104,57 @@ else:
     unit = "мг/куб.м"
     color = "blue"
 
-time = st.sidebar.text_input(
-    "Час вимірювання",
-    datetime.now().strftime("%Y-%m-%d %H:%M")
-)
-
 if st.sidebar.button("➕ Додати точку"):
     new_row = pd.DataFrame([{
-        "lat": lat,
-        "lon": lon,
-        "value": round(value,2),
-        "time": time,
-        "substance": substance,
-        "unit": unit,
-        "color": color
+        "lat": lat, "lon": lon, "value": round(value,2),
+        "time": time, "substance": substance, "unit": unit, "color": color
     }])
     if mode == "Радіаційна":
         st.session_state.radiation = pd.concat([st.session_state.radiation, new_row], ignore_index=True)
     else:
         st.session_state.chemical = pd.concat([st.session_state.chemical, new_row], ignore_index=True)
+    st.session_state.map_data_version += 1
 
 # =========================
-# Побудова карти
+# Чекбокси для шарів
 # =========================
+st.sidebar.header("🗂 Шари на карті")
+show_rad = st.sidebar.checkbox("Радіаційна обстановка", value=True)
+show_chem = st.sidebar.checkbox("Хімічна обстановка", value=True)
+
+# =========================
+# Побудова карти адаптивно
+# =========================
+map_key = f"map_{st.session_state.map_data_version}"
 m = folium.Map(location=[50.45, 30.52], zoom_start=12, tiles="OpenStreetMap")
 
-# 🎯 FeatureGroup для шарів
-fg_rad = folium.FeatureGroup(name="Радіаційна обстановка")
-fg_chem = folium.FeatureGroup(name="Хімічна обстановка")
+def add_points(df, is_rad=True):
+    for _, r in df.iterrows():
+        text = f"<b>{'Радіація' if is_rad else r.substance}</b><br>{r.value:.2f} {r.unit}<br><i>{r.time}</i>"
+        folium.CircleMarker(
+            location=[r.lat, r.lon], radius=7, color=r.color,
+            fill=True, fill_color=r.color, fill_opacity=0.9
+        ).add_to(m)
+        folium.Marker(
+            [r.lat, r.lon],
+            icon=DivIcon(
+                icon_size=(220,50), icon_anchor=(0,0),
+                html=f'<div style="color:{r.color};font-weight:bold;background:transparent">{text}</div>'
+            )
+        ).add_to(m)
 
-# Радіація (бордовий)
-for _, r in st.session_state.radiation.iterrows():
-    text = f"<b>Радіація</b><br>{r.value:.2f} мЗв/год<br><i>{r.time}</i>"
-    folium.CircleMarker(
-        location=[r.lat, r.lon],
-        radius=7,
-        color="darkred",
-        fill=True,
-        fill_color="darkred",
-        fill_opacity=0.9
-    ).add_to(fg_rad)
-    folium.Marker(
-        [r.lat, r.lon],
-        icon=DivIcon(
-            icon_size=(200,50),
-            icon_anchor=(0,0),
-            html=f'<div style="color:darkred;font-weight:bold;background:transparent">{text}</div>'
-        )
-    ).add_to(fg_rad)
+if show_rad and not st.session_state.radiation.empty:
+    add_points(st.session_state.radiation, is_rad=True)
+if show_chem and not st.session_state.chemical.empty:
+    add_points(st.session_state.chemical, is_rad=False)
 
-# Хімія (синій)
-for _, r in st.session_state.chemical.iterrows():
-    text = f"<b>{r.substance}</b><br>{r.value:.2f} мг/куб.м<br><i>{r.time}</i>"
-    folium.CircleMarker(
-        location=[r.lat, r.lon],
-        radius=7,
-        color="blue",
-        fill=True,
-        fill_color="blue",
-        fill_opacity=0.9
-    ).add_to(fg_chem)
-    folium.Marker(
-        [r.lat, r.lon],
-        icon=DivIcon(
-            icon_size=(220,50),
-            icon_anchor=(0,0),
-            html=f'<div style="color:blue;font-weight:bold;background:transparent">{text}</div>'
-        )
-    ).add_to(fg_chem)
-
-# Додаємо шари на карту
-fg_rad.add_to(m)
-fg_chem.add_to(m)
-
-# Layer Control для включення/вимкнення
 folium.LayerControl(collapsed=False).add_to(m)
 
 # =========================
 # Відображення карти
 # =========================
-st_folium(m, width=1400, height=650)
+st.markdown("<style>iframe {width:100% !important;}</style>", unsafe_allow_html=True)
+st_folium(m, key=map_key, width=0, height=650)
 
 # =========================
 # Збереження HTML
