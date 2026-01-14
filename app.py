@@ -4,8 +4,15 @@ import folium
 from streamlit_folium import st_folium
 from folium.features import DivIcon
 from datetime import datetime
+from io import BytesIO
 
-st.set_page_config(page_title="Карта обстановки", layout="wide")
+# ===============================
+# НАЛАШТУВАННЯ
+# ===============================
+st.set_page_config(
+    page_title="Карта хімічної та радіаційної обстановки",
+    layout="wide"
+)
 
 # ===============================
 # СТАН
@@ -19,7 +26,38 @@ if "data" not in st.session_state:
 st.title("🗺️ Карта хімічної та радіаційної обстановки")
 
 # ===============================
-# БОКОВА ПАНЕЛЬ
+# ІНСТРУКЦІЯ
+# ===============================
+with st.sidebar.expander("📘 Інструкція користування"):
+    st.markdown("""
+**Призначення програми**  
+Програма призначена для нанесення на карту:
+- хімічної обстановки (мг/куб.м)
+- радіаційної обстановки (мЗв/год)
+
+**Вхідні дані**
+- координати точки вимірювання
+- значення концентрації або потужності дози
+- час вимірювання
+- назва небезпечної речовини (для хімії)
+
+**Способи введення даних**
+1. Вручну через графічний інтерфейс
+2. Через CSV-файли:
+   - `chemical.data.csv`
+   - `radiation.data.csv`
+
+**Вихідні дані**
+- карта з точками вимірювання
+- кольорове розділення:
+  - ☣️ хімія — **синій**
+  - ☢️ радіація — **бордовий**
+- підпис біля кожної точки
+- можливість збереження карти у HTML
+""")
+
+# ===============================
+# БОКОВА ПАНЕЛЬ — ВРУЧНУ
 # ===============================
 st.sidebar.header("➕ Додати точку вручну")
 
@@ -33,18 +71,25 @@ if mode == "Радіаційна":
     unit = "мЗв/год"
     color = "darkred"
 else:
-    substance = st.sidebar.text_input("Речовина", "Хлор")
+    substance = st.sidebar.text_input("Назва речовини", "Хлор")
     value = st.sidebar.number_input("Концентрація (мг/куб.м)", format="%.4f")
     unit = "мг/куб.м"
     color = "blue"
 
-time = st.sidebar.text_input("Час", datetime.now().strftime("%Y-%m-%d %H:%M"))
+time = st.sidebar.text_input(
+    "Час вимірювання",
+    datetime.now().strftime("%Y-%m-%d %H:%M")
+)
 
-if st.sidebar.button("➕ Додати"):
+if st.sidebar.button("➕ Додати точку"):
     st.session_state.data.append({
-        "lat": lat, "lon": lon, "value": round(value, 2),
-        "time": time, "substance": substance,
-        "unit": unit, "color": color
+        "lat": lat,
+        "lon": lon,
+        "value": round(value, 2),
+        "time": time,
+        "substance": substance,
+        "unit": unit,
+        "color": color
     })
 
 # ===============================
@@ -53,10 +98,13 @@ if st.sidebar.button("➕ Додати"):
 st.sidebar.header("📂 Завантаження CSV")
 
 rad_file = st.sidebar.file_uploader(
-    "☢️ radiation.data.csv", type="csv", key="rad"
+    "☢️ radiation.data.csv",
+    type="csv"
 )
+
 chem_file = st.sidebar.file_uploader(
-    "☣️ chemical.data.csv", type="csv", key="chem"
+    "☣️ chemical.data.csv",
+    type="csv"
 )
 
 if st.sidebar.button("📥 Завантажити CSV"):
@@ -64,7 +112,8 @@ if st.sidebar.button("📥 Завантажити CSV"):
         df = pd.read_csv(rad_file)
         for _, r in df.iterrows():
             st.session_state.data.append({
-                "lat": r.lat, "lon": r.lon,
+                "lat": r.lat,
+                "lon": r.lon,
                 "value": round(r.dose, 2),
                 "time": r.time,
                 "substance": "Радіація",
@@ -76,7 +125,8 @@ if st.sidebar.button("📥 Завантажити CSV"):
         df = pd.read_csv(chem_file)
         for _, r in df.iterrows():
             st.session_state.data.append({
-                "lat": r.lat, "lon": r.lon,
+                "lat": r.lat,
+                "lon": r.lon,
                 "value": round(r.concentration, 2),
                 "time": r.time,
                 "substance": r.substance,
@@ -95,25 +145,51 @@ if st.sidebar.button("🧹 Очистити всі дані"):
 # ===============================
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
-    m = folium.Map(location=[df.lat.mean(), df.lon.mean()], zoom_start=13)
+
+    m = folium.Map(
+        location=[df.lat.mean(), df.lon.mean()],
+        zoom_start=12,
+        control_scale=True
+    )
 
     for _, r in df.iterrows():
         folium.CircleMarker(
-            [r.lat, r.lon], radius=7,
-            color=r.color, fill=True,
-            fill_color=r.color, fill_opacity=0.8
+            location=[r.lat, r.lon],
+            radius=7,
+            color=r.color,
+            fill=True,
+            fill_color=r.color,
+            fill_opacity=0.9
         ).add_to(m)
 
         folium.Marker(
             [r.lat, r.lon],
             icon=DivIcon(html=f"""
-            <div style="color:{r.color};font-weight:bold">
-            {r.substance} – {r.value:.2f} {r.unit}<br>{r.time}
+            <div style="
+                color:{r.color};
+                font-weight:bold;
+                background:transparent;
+                white-space:nowrap">
+            {r.substance} – {r.value:.2f} {r.unit}<br>
+            {r.time}
             </div>
             """)
         ).add_to(m)
 
-    st_folium(m, height=600)
+    # ВІДОБРАЖЕННЯ НА ВСЮ ШИРИНУ
+    st_folium(m, height=650, width=None)
+
+    # ===============================
+    # ЕКСПОРТ HTML
+    # ===============================
+    html_data = m.get_root().render()
+    st.download_button(
+        "💾 Зберегти карту у HTML",
+        data=html_data,
+        file_name="chemical_radiation_map.html",
+        mime="text/html"
+    )
+
 else:
-    st.info("Дані відсутні")
+    st.info("Дані для відображення відсутні")
 
