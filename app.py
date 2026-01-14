@@ -21,6 +21,8 @@ if "radiation" not in st.session_state:
     st.session_state.radiation = pd.DataFrame()
 if "chemical" not in st.session_state:
     st.session_state.chemical = pd.DataFrame()
+if "map_object" not in st.session_state:
+    st.session_state.map_object = None
 if "map_data_version" not in st.session_state:
     st.session_state.map_data_version = 0
 
@@ -59,6 +61,7 @@ with col3:
     if st.button("🧹 Очистити всі дані"):
         st.session_state.radiation = pd.DataFrame()
         st.session_state.chemical = pd.DataFrame()
+        st.session_state.map_object = None
         st.session_state.map_data_version += 1
 
 # =========================
@@ -123,12 +126,9 @@ show_rad = st.sidebar.checkbox("Радіаційна обстановка", valu
 show_chem = st.sidebar.checkbox("Хімічна обстановка", value=True)
 
 # =========================
-# Побудова карти адаптивно
+# Функція додавання точок на карту
 # =========================
-map_key = f"map_{st.session_state.map_data_version}"
-m = folium.Map(location=[50.45, 30.52], zoom_start=12, tiles="OpenStreetMap")
-
-def add_points(df, is_rad=True):
+def add_points(df, m, is_rad=True):
     for _, r in df.iterrows():
         if is_rad:
             color = "darkred"
@@ -151,23 +151,32 @@ def add_points(df, is_rad=True):
             )
         ).add_to(m)
 
-if show_rad and not st.session_state.radiation.empty:
-    add_points(st.session_state.radiation, is_rad=True)
-if show_chem and not st.session_state.chemical.empty:
-    add_points(st.session_state.chemical, is_rad=False)
-
-folium.LayerControl(collapsed=False).add_to(m)
+# =========================
+# Кнопка для оновлення карти
+# =========================
+if st.button("🔄 Оновити карту"):
+    m = folium.Map(location=[50.45, 30.52], zoom_start=12, tiles="OpenStreetMap")
+    if show_rad and not st.session_state.radiation.empty:
+        add_points(st.session_state.radiation, m, is_rad=True)
+    if show_chem and not st.session_state.chemical.empty:
+        add_points(st.session_state.chemical, m, is_rad=False)
+    folium.LayerControl(collapsed=False).add_to(m)
+    st.session_state.map_object = m
 
 # =========================
-# Відображення карти адаптивно
+# Відображення карти
 # =========================
-st.markdown("<style>iframe {width:100% !important;}</style>", unsafe_allow_html=True)
-st_folium(m, key=map_key, width=0, height=650)
+if st.session_state.map_object:
+    st.markdown("<style>iframe {width:100% !important;}</style>", unsafe_allow_html=True)
+    st_folium(st.session_state.map_object, width=0, height=650)
 
 # =========================
 # Збереження HTML
 # =========================
 if st.button("💾 Зберегти карту у HTML"):
-    m.save("situation_map.html")
-    st.success("✅ Файл situation_map.html створено")
+    if st.session_state.map_object:
+        st.session_state.map_object.save("situation_map.html")
+        st.success("✅ Файл situation_map.html створено")
+    else:
+        st.warning("⚠ Спершу натисніть 'Оновити карту'")
 
