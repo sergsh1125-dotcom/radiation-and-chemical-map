@@ -23,8 +23,6 @@ if "chemical" not in st.session_state:
     st.session_state.chemical = pd.DataFrame()
 if "map_object" not in st.session_state:
     st.session_state.map_object = None
-if "map_data_version" not in st.session_state:
-    st.session_state.map_data_version = 0
 
 # =========================
 # Інструкція
@@ -35,14 +33,14 @@ with st.expander("📘 Інструкція користування"):
 Візуалізація радіаційної та хімічної обстановки на карті.
 
 ### Вхідні дані
-- Завантаження CSV-файлів:
+- CSV-файли:
   - `radiation.data.csv` (колонки: lat, lon, value, time)
   - `chemical.data.csv` (колонки: lat, lon, value, time, substance)
 
 ### Вихідні дані
 - Точки вимірювань на карті
 - Підписи біля точок
-- Можливість збереження карти у HTML
+- Збереження карти у HTML
 
 ### Способи введення даних
 1. Вручну через бокову панель
@@ -50,25 +48,22 @@ with st.expander("📘 Інструкція користування"):
 """)
 
 # =========================
-# Кнопки керування
+# Завантаження CSV
 # =========================
 col1, col2, col3 = st.columns([3,3,2])
 with col1:
-    rad_file = st.file_uploader("☢ Завантажити radiation.data.csv", type="csv", key="rad")
+    rad_file = st.file_uploader("☢ Завантажити radiation.data.csv", type="csv")
 with col2:
-    chem_file = st.file_uploader("🧪 Завантажити chemical.data.csv", type="csv", key="chem")
+    chem_file = st.file_uploader("🧪 Завантажити chemical.data.csv", type="csv")
 with col3:
     if st.button("🧹 Очистити всі дані"):
         st.session_state.radiation = pd.DataFrame()
         st.session_state.chemical = pd.DataFrame()
         st.session_state.map_object = None
-        st.session_state.map_data_version += 1
 
-# =========================
-# Завантаження CSV
-# =========================
+# Функція завантаження CSV
 def load_csv(file, required_cols):
-    if file:
+    if file is not None:
         df = pd.read_csv(file)
         if required_cols.issubset(df.columns):
             return df
@@ -79,19 +74,16 @@ def load_csv(file, required_cols):
 rad_df = load_csv(rad_file, {"lat", "lon", "value", "time"})
 if not rad_df.empty:
     st.session_state.radiation = rad_df
-    st.session_state.map_data_version += 1
 
 chem_df = load_csv(chem_file, {"lat", "lon", "value", "time", "substance"})
 if not chem_df.empty:
     st.session_state.chemical = chem_df
-    st.session_state.map_data_version += 1
 
 # =========================
 # Ручне введення точок
 # =========================
 st.sidebar.header("➕ Додати точку вручну")
 mode = st.sidebar.radio("Тип обстановки", ["Радіаційна", "Хімічна"])
-
 lat = st.sidebar.number_input("Широта", format="%.6f")
 lon = st.sidebar.number_input("Довгота", format="%.6f")
 time = st.sidebar.text_input("Час вимірювання", datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -116,14 +108,6 @@ if st.sidebar.button("➕ Додати точку"):
         st.session_state.radiation = pd.concat([st.session_state.radiation, new_row], ignore_index=True)
     else:
         st.session_state.chemical = pd.concat([st.session_state.chemical, new_row], ignore_index=True)
-    st.session_state.map_data_version += 1
-
-# =========================
-# Чекбокси для шарів
-# =========================
-st.sidebar.header("🗂 Шари на карті")
-show_rad = st.sidebar.checkbox("Радіаційна обстановка", value=True)
-show_chem = st.sidebar.checkbox("Хімічна обстановка", value=True)
 
 # =========================
 # Функція додавання точок на карту
@@ -155,17 +139,24 @@ def add_points(df, m, is_rad=True):
         ).add_to(m)
 
 # =========================
-# Кнопка для оновлення карти
+# Чекбокси для шарів
+# =========================
+st.sidebar.header("🗂 Шари на карті")
+show_rad = st.sidebar.checkbox("Радіаційна обстановка", value=True)
+show_chem = st.sidebar.checkbox("Хімічна обстановка", value=True)
+
+# =========================
+# Кнопка оновлення карти
 # =========================
 if st.button("🔄 Оновити карту"):
     if st.session_state.radiation.empty and st.session_state.chemical.empty:
         st.warning("⚠ Спершу завантажте дані або додайте точки вручну")
     else:
-        # Автоцентрування карти по всіх точках
+        # Центрування карти
         all_points = pd.concat([st.session_state.radiation, st.session_state.chemical], ignore_index=True)
         center_lat = all_points.lat.mean()
         center_lon = all_points.lon.mean()
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles="OpenStreetMap")
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
 
         if show_rad and not st.session_state.radiation.empty:
             add_points(st.session_state.radiation, m, is_rad=True)
