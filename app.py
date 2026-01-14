@@ -29,7 +29,7 @@ if "map_object" not in st.session_state:
 # =========================
 with st.expander("📘 Інструкція користування"):
     st.markdown("""
-**Призначення програми**  
+**Призначення програми:**  
 Візуалізація радіаційної та хімічної обстановки на карті.
 
 ### Вхідні дані
@@ -50,34 +50,14 @@ with st.expander("📘 Інструкція користування"):
 # =========================
 # Завантаження CSV
 # =========================
-col1, col2, col3 = st.columns([3,3,2])
-with col1:
-    rad_file = st.file_uploader("☢ Завантажити radiation.data.csv", type="csv")
-with col2:
-    chem_file = st.file_uploader("🧪 Завантажити chemical.data.csv", type="csv")
-with col3:
-    if st.button("🧹 Очистити всі дані"):
-        st.session_state.radiation = pd.DataFrame()
-        st.session_state.chemical = pd.DataFrame()
-        st.session_state.map_object = None
+st.sidebar.header("📁 Завантаження CSV")
+rad_file = st.sidebar.file_uploader("☢ radiation.data.csv", type="csv", key="rad")
+chem_file = st.sidebar.file_uploader("🧪 chemical.data.csv", type="csv", key="chem")
 
-# Функція завантаження CSV
-def load_csv(file, required_cols):
-    if file is not None:
-        df = pd.read_csv(file)
-        if required_cols.issubset(df.columns):
-            return df
-        else:
-            st.error(f"❌ {file.name} має неправильні колонки")
-    return pd.DataFrame()
-
-rad_df = load_csv(rad_file, {"lat", "lon", "value", "time"})
-if not rad_df.empty:
-    st.session_state.radiation = rad_df
-
-chem_df = load_csv(chem_file, {"lat", "lon", "value", "time", "substance"})
-if not chem_df.empty:
-    st.session_state.chemical = chem_df
+if st.sidebar.button("🧹 Очистити всі дані"):
+    st.session_state.radiation = pd.DataFrame()
+    st.session_state.chemical = pd.DataFrame()
+    st.session_state.map_object = None
 
 # =========================
 # Ручне введення точок
@@ -149,10 +129,25 @@ show_chem = st.sidebar.checkbox("Хімічна обстановка", value=Tru
 # Кнопка оновлення карти
 # =========================
 if st.button("🔄 Оновити карту"):
+    # Завантажуємо CSV у session_state
+    if rad_file:
+        df = pd.read_csv(rad_file)
+        required = {"lat","lon","value","time"}
+        if required.issubset(df.columns):
+            st.session_state.radiation = df
+        else:
+            st.error("radiation.data.csv має невірні колонки")
+    if chem_file:
+        df = pd.read_csv(chem_file)
+        required = {"lat","lon","value","time","substance"}
+        if required.issubset(df.columns):
+            st.session_state.chemical = df
+        else:
+            st.error("chemical.data.csv має невірні колонки")
+
     if st.session_state.radiation.empty and st.session_state.chemical.empty:
         st.warning("⚠ Спершу завантажте дані або додайте точки вручну")
     else:
-        # Центрування карти
         all_points = pd.concat([st.session_state.radiation, st.session_state.chemical], ignore_index=True)
         center_lat = all_points.lat.mean()
         center_lon = all_points.lon.mean()
