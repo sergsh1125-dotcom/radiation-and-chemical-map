@@ -6,54 +6,50 @@ from folium.features import DivIcon
 from datetime import datetime
 
 # ===============================
-# Налаштування сторінки
+# Сторінка
 # ===============================
-st.set_page_config(
-    page_title="Карта радіаційної та хімічної обстановки",
-    layout="wide"
-)
+st.set_page_config(page_title="Радіаційна та хімічна обстановка", layout="wide")
 
-# Приховуємо меню та футер
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+iframe {width: 100% !important;}
 </style>
 """, unsafe_allow_html=True)
 
 # ===============================
 # Стан програми
 # ===============================
-for key in ["radiation","chemical","substance","map_object"]:
+for key in ["radiation","chemical","substance"]:
     if key not in st.session_state:
-        if key=="map_object":
-            st.session_state[key]=None
-        elif key=="substance":
-            st.session_state[key]="Хлор"
+        if key=="substance":
+            st.session_state[key] = "Хлор"
         else:
-            st.session_state[key]=pd.DataFrame(columns=["lat","lon","value","time","substance"])
+            st.session_state[key] = pd.DataFrame(columns=["lat","lon","value","time","substance"])
 
 # ===============================
 # Заголовок та інструкція
 # ===============================
 st.title("🗺️ Карта радіаційної та хімічної обстановки")
 
-if st.button("ℹ️ Інструкція користування", use_container_width=True):
-    st.info("""
+with st.expander("ℹ️ Інструкція користування", expanded=False):
+    st.markdown("""
 **Призначення:**  
-Візуалізація радіаційної та хімічної обстановки на карті.
+Програма відображає радіаційну та хімічну обстановку на карті.
 
 **Вхідні дані:**  
-- CSV-файли:
+- CSV:
     - `radiation.data.csv` (lat, lon, value, time)
     - `chemical.data.csv` (lat, lon, value, time, substance)
-- Або введення точок вручну.
+- Або ручне введення точок.
 
 **Вихідні дані:**  
-- Бордові точки — радіація, сині — хімія  
-- Підписи: назва речовини/потужність дози – дата/час вимірювання  
-- HTML-файл карти для завантаження
+- Бордові точки — радіація  
+- Сині точки — хімія  
+- Підписи біля точок: назва/потужність або концентрація – дата/час  
+- HTML карта для завантаження
 """)
 
 # ===============================
@@ -62,7 +58,7 @@ if st.button("ℹ️ Інструкція користування", use_contain
 col_map, col_gui = st.columns([2.2,1])
 
 # ===============================
-# GUI: права панель
+# GUI
 # ===============================
 with col_gui:
     st.subheader("⚙️ Ввід даних")
@@ -94,17 +90,18 @@ with col_gui:
 
     if rad_file:
         df = pd.read_csv(rad_file)
+        df["substance"] = "Радіація"
         st.session_state.radiation = df
         st.success(f"Завантажено {len(df)} точок радіації")
+
     if chem_file:
         df = pd.read_csv(chem_file)
         st.session_state.chemical = df
         st.success(f"Завантажено {len(df)} точок хімії")
 
     if st.button("🧹 Очистити всі дані", use_container_width=True):
-        st.session_state.radiation = pd.DataFrame(columns=["lat","lon","value","time","substance"])
-        st.session_state.chemical = pd.DataFrame(columns=["lat","lon","value","time","substance"])
-        st.session_state.map_object = None
+        st.session_state.radiation = st.session_state.radiation.iloc[0:0]
+        st.session_state.chemical = st.session_state.chemical.iloc[0:0]
 
 # ===============================
 # Функція для нанесення точок
@@ -119,47 +116,41 @@ def add_points(df, m, color):
             white-space: nowrap;
             background:transparent;
         ">
-            {r.substance} – {r.value:.2f}<br>
+            {r['substance']} – {r['value']:.2f}<br>
             <hr style="margin:2px 0;border:1px solid {color};">
-            {r.time}
+            {r['time']}
         </div>
         """
         folium.CircleMarker(
-            [r.lat,r.lon], radius=7, color=color,
+            [r['lat'], r['lon']], radius=7, color=color,
             fill=True, fill_color=color, fill_opacity=0.9
         ).add_to(m)
-        folium.Marker([r.lat,r.lon], icon=DivIcon(icon_anchor=(0,-12), html=text_html)).add_to(m)
+        folium.Marker([r['lat'], r['lon']], icon=DivIcon(icon_anchor=(0,-12), html=text_html)).add_to(m)
 
 # ===============================
-# Кнопка оновлення карти
+# Карта
 # ===============================
-if st.button("🔄 Оновити карту"):
+with col_map:
     all_points = pd.concat([st.session_state.radiation, st.session_state.chemical], ignore_index=True)
-    if not all_points.empty:
+    if all_points.empty:
+        st.info("Немає даних для відображення карти")
+    else:
         center_lat = all_points.lat.mean()
         center_lon = all_points.lon.mean()
         m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
+
         if not st.session_state.radiation.empty:
             add_points(st.session_state.radiation, m, "darkred")
         if not st.session_state.chemical.empty:
             add_points(st.session_state.chemical, m, "blue")
-        folium.LayerControl(collapsed=False).add_to(m)
-        st.session_state.map_object = m
 
-# ===============================
-# Відображення карти
-# ===============================
-with col_map:
-    if st.session_state.map_object:
-        st.markdown("<style>iframe {width:100% !important;}</style>", unsafe_allow_html=True)
-        st_folium(st.session_state.map_object, width=0, height=600)
+        folium.LayerControl(collapsed=False).add_to(m)
+        st_folium(m, width=0, height=600)
 
         # HTML експорт
-        st.session_state.map_object.save("situation_map.html")
+        m.save("situation_map.html")
         with open("situation_map.html","rb") as f:
             st.download_button("💾 Завантажити карту (HTML)", f,
                                file_name="situation_map.html",
                                mime="text/html", use_container_width=True)
-    else:
-        st.info("Немає даних для відображення карти")
 
