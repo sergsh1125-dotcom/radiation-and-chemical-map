@@ -135,14 +135,17 @@ def add_points(df, m, is_rad=True):
             unit = "мЗв/год"
             name = "Радіація"
         else:
-            color = r.color
-            unit = r.unit
-            name = r.substance
+            color = r.color if "color" in df.columns else "blue"
+            unit = r.unit if "unit" in df.columns else "мг/куб.м"
+            name = r.substance if "substance" in df.columns else "Хімія"
+
         text = f"<b>{name}</b><br>{r.value:.2f} {unit}<br><i>{r.time}</i>"
+
         folium.CircleMarker(
             location=[r.lat, r.lon], radius=7, color=color,
             fill=True, fill_color=color, fill_opacity=0.9
         ).add_to(m)
+
         folium.Marker(
             [r.lat, r.lon],
             icon=DivIcon(
@@ -155,13 +158,22 @@ def add_points(df, m, is_rad=True):
 # Кнопка для оновлення карти
 # =========================
 if st.button("🔄 Оновити карту"):
-    m = folium.Map(location=[50.45, 30.52], zoom_start=12, tiles="OpenStreetMap")
-    if show_rad and not st.session_state.radiation.empty:
-        add_points(st.session_state.radiation, m, is_rad=True)
-    if show_chem and not st.session_state.chemical.empty:
-        add_points(st.session_state.chemical, m, is_rad=False)
-    folium.LayerControl(collapsed=False).add_to(m)
-    st.session_state.map_object = m
+    if st.session_state.radiation.empty and st.session_state.chemical.empty:
+        st.warning("⚠ Спершу завантажте дані або додайте точки вручну")
+    else:
+        # Автоцентрування карти по всіх точках
+        all_points = pd.concat([st.session_state.radiation, st.session_state.chemical], ignore_index=True)
+        center_lat = all_points.lat.mean()
+        center_lon = all_points.lon.mean()
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles="OpenStreetMap")
+
+        if show_rad and not st.session_state.radiation.empty:
+            add_points(st.session_state.radiation, m, is_rad=True)
+        if show_chem and not st.session_state.chemical.empty:
+            add_points(st.session_state.chemical, m, is_rad=False)
+
+        folium.LayerControl(collapsed=False).add_to(m)
+        st.session_state.map_object = m
 
 # =========================
 # Відображення карти
