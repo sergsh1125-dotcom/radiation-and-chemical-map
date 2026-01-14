@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Карта радіаційної та хімічної обстановки",
     layout="wide"
 )
-st.title("🗺️ Карта радіаційної та хімічної обстановки (адаптивна)")
+st.title("🗺️ Карта радіаційної та хімічної обстановки")
 
 # =========================
 # Session State
@@ -130,16 +130,24 @@ m = folium.Map(location=[50.45, 30.52], zoom_start=12, tiles="OpenStreetMap")
 
 def add_points(df, is_rad=True):
     for _, r in df.iterrows():
-        text = f"<b>{'Радіація' if is_rad else r.substance}</b><br>{r.value:.2f} {r.unit}<br><i>{r.time}</i>"
+        if is_rad:
+            color = "darkred"
+            unit = "мЗв/год"
+            name = "Радіація"
+        else:
+            color = r.color
+            unit = r.unit
+            name = r.substance
+        text = f"<b>{name}</b><br>{r.value:.2f} {unit}<br><i>{r.time}</i>"
         folium.CircleMarker(
-            location=[r.lat, r.lon], radius=7, color=r.color,
-            fill=True, fill_color=r.color, fill_opacity=0.9
+            location=[r.lat, r.lon], radius=7, color=color,
+            fill=True, fill_color=color, fill_opacity=0.9
         ).add_to(m)
         folium.Marker(
             [r.lat, r.lon],
             icon=DivIcon(
                 icon_size=(220,50), icon_anchor=(0,0),
-                html=f'<div style="color:{r.color};font-weight:bold;background:transparent">{text}</div>'
+                html=f'<div style="color:{color};font-weight:bold;background:transparent">{text}</div>'
             )
         ).add_to(m)
 
@@ -151,7 +159,7 @@ if show_chem and not st.session_state.chemical.empty:
 folium.LayerControl(collapsed=False).add_to(m)
 
 # =========================
-# Відображення карти
+# Відображення карти адаптивно
 # =========================
 st.markdown("<style>iframe {width:100% !important;}</style>", unsafe_allow_html=True)
 st_folium(m, key=map_key, width=0, height=650)
